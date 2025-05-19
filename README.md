@@ -52,3 +52,5 @@ Run the **query-gsi** project to test out the same queries executed on both the 
 cd query-gsi
 dotnet run
 ```
+
+> Tip: Because the data is randomly generated, you may need to swap out the phone number and area code that is used in the sample queries. If no items are returned, try replacing these values in **query-gsi/Program.cs** on lines 28 and 37 with values from your generated dataset.
