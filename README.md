@@ -1,6 +1,6 @@
 # Azure Cosmos DB Global Secondary Index Demo
 
-Global secondary indexes (GSIs) help optimize cross partition queries in Azure Cosmos DB. GSIs are containers with a copy of data from a source container and are automatically kept in sync as data in the source container changes. Because GSIs are independent containers, they have their own partition key, throughput, indexing policy and any other container properties.
+Global secondary indexes (GSIs) help optimize cross partition queries in Azure Cosmos DB. GSIs are containers with a copy of data from a source container and are automatically kept in sync as data in the source container changes. Because GSIs are independent containers, they have their own partition key, throughput, indexing policy as well as any other container properties.
 
 This project has two applications to demonstrate how to use global secondary indexes.
 - A data loader project to write items into a source container.
@@ -17,17 +17,19 @@ This project has two applications to demonstrate how to use global secondary ind
 3. Enable global secondary indexes in the **Features** page of your account.
 
 4. Create a source container with the following configuration
-    - Database name: UsersDB
-    - Container name: users
-    - Partition key: /email
+    - Database name: OrdersDB
+    - Container name: orders
+    - Partition key: /customerId
 
 > Tip: Global secondary indexes are effective at optimizing cross partition queries. The more physical partitions in a given container, the greater opportunity to reduce query RU charges and latency. You can guarantee a given number of physical partitions when creating a new container with autoscale throughput. To create a container with 10 physical partitions, create the container with 100,000 RUs. You can lower the throughput 10x after the container has been created.
 
 5. Create a GSI container with the following configuration
-    - Container name: usersByPhone
-    - Source container name: users
-    - GSI definition: SELECT * FROM c
-    - Partition key: /phone/number
+    - Container name: ordersByZip
+    - Source container name: orders
+    - GSI definition: SELECT c.id, c.customerId, c.tenantId, c.orderDate, c.orderStatus, c.totalAmount, c.payment, c.shippingAddress FROM c
+    - Partition key: /shippingAddress/zipCode, /shippingAddress/street
+
+6. This sample uses identity-based authentication (Microsoft Entra ID / RBAC). Make sure your account has the **Cosmos DB Built-in Data Contributor** role assigned.
 
 ### Update Settings
 
@@ -35,9 +37,9 @@ This project has two applications to demonstrate how to use global secondary ind
 
 ## Run the sample
 
-### Load sample users
+### Load sample orders
 
-Run the **data-loader** project to populate the *users* container with 200,000 users. Notice that data is automatically synced to the *usersByPhone* container.
+Run the **data-loader** project to populate the *orders* container with 200,000 orders. Notice that data is automatically synced to the *ordersByZip* container.
 
 ```cmd
 cd data-loader
@@ -53,4 +55,4 @@ cd query-gsi
 dotnet run
 ```
 
-> Tip: Because the data is randomly generated, you may need to swap out the phone number and area code that is used in the sample queries. If no items are returned, try replacing these values in **query-gsi/Program.cs** on lines 28 and 37 with values from your generated dataset.
+> Tip: Because the data is randomly generated, you may need to swap out the customer id, zip code and street values used in the sample queries. If no items are returned, try replacing these values in **query-gsi/Program.cs** with values from your generated dataset.

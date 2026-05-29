@@ -4,6 +4,7 @@ using Azure.Identity;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using data_loader;
+using System.Diagnostics;
 
 var config = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json")
@@ -18,7 +19,7 @@ CosmosClientOptions clientOptions = new CosmosClientOptions()
     AllowBulkExecution = true
 };
 CosmosClient client = new CosmosClient(config["CosmosEndpoint"], new DefaultAzureCredential(), clientOptions);
-Container source = client.GetDatabase(config["DatabaseName"]).GetContainer(config["SourceContainerName"]);
+Container source = client.GetDatabase(config["OrdersDatabase"]).GetContainer(config["OrdersSource"]);
 
 var faker = new Faker("en")
 {
@@ -26,7 +27,7 @@ var faker = new Faker("en")
 };
 
 var numDocsToWrite = 200000;
-var batchSize = 100;
+var batchSize = 50;
 var sleep = 1000;
 
 var numWritten = 0;
@@ -38,11 +39,15 @@ while (numWritten < numDocsToWrite)
     var cost = 0.0;
     var errors = 0;
 
+    Stopwatch stopWatch = new Stopwatch();
+    stopWatch.Start();
+
     List<Task> concurrentTasks = new List<Task>();
-    var users = GenerateRandomUsers(batchSize);
-    foreach (var user in users)
+    var orders = GenerateRandomOrders(batchSize);
+
+    foreach (var order in orders)
     {
-        concurrentTasks.Add(source.CreateItemAsync(user, new PartitionKey(user.Email)).ContinueWith(t =>
+        concurrentTasks.Add(source.CreateItemAsync(order, new PartitionKey(order.CustomerId)).ContinueWith(t =>
         {
             if (t.Status == TaskStatus.RanToCompletion)
             {
@@ -58,40 +63,52 @@ while (numWritten < numDocsToWrite)
 
     await Task.WhenAll(concurrentTasks);
     numWritten += batchSize - errors;
-    Console.WriteLine($"Documents written this batch:{batchSize - errors}   Cost: {cost}   Errors: {errors} \n");
 
     Thread.Sleep(sleep);
+    stopWatch.Stop();
+
+    Console.WriteLine($"Documents written this batch:{batchSize - errors}   Cost: {cost}   Errors: {errors}   Time: {stopWatch.Elapsed} \n");
 }
 
 Console.WriteLine($"Finished writing {numWritten} records.");
 
-static List<data_loader.User> GenerateRandomUsers(int numberOfDocumentsPerBatch)
+static List<Order> GenerateRandomOrders(int numberOfDocumentsPerBatch)
 {
-    var nameFaker = new Faker<Name>()
+    var productFaker = new Faker<Product>()
         .StrictMode(true)
-        .RuleFor(n => n.First, f => f.Name.FirstName())
-        .RuleFor(n => n.Last, f => f.Name.LastName());
+        .RuleFor(p => p.ProductId, f => Guid.NewGuid().ToString())
+        .RuleFor(p => p.ProductName, f => f.Commerce.ProductName())
+        .RuleFor(p => p.Quantity, f => f.Random.Int(1, 5))
+        .RuleFor(p => p.Price, f => f.Finance.Amount());
 
-    var phoneTypes = new[] { "Mobile", "Home", "Work", "Other" };
-    var phoneFaker = new Faker<Phone>()
+    var paymentInfoFaker = new Faker<PaymentInfo>()
         .StrictMode(true)
-        .RuleFor(p => p.Number, f => f.Phone.PhoneNumberFormat())
-        .RuleFor(p => p.Type, f => f.PickRandom(phoneTypes));
+        .RuleFor(p => p.TransactionId, f => Guid.NewGuid().ToString())
+        .RuleFor(p => p.Paid, f => f.Random.Bool());
 
-    var userFaker = new Faker<data_loader.User>()
+    var addressFaker = new Faker<Address>()
         .StrictMode(true)
-        .RuleFor(u => u.Id, f => f.Internet.UserName())
-        .RuleFor(u => u.Name, f => nameFaker.Generate())
-        .RuleFor(u => u.Email, f => f.Internet.Email())
-        .RuleFor(u => u.SecondaryEmails, f => Enumerable.Range(1, 3)
-                            .Select(_ => f.Internet.Email())
-                            .ToList())
-        .RuleFor(u => u.Phone, f => phoneFaker.Generate())
-        .RuleFor(u => u.SecondaryPhones, f => phoneFaker.Generate(f.Random.Int(1, 3)))
-        .RuleFor(u => u.DateOfBirth, f => f.Person.DateOfBirth.ToUniversalTime())
-        .RuleFor(u => u.IsActive, f => f.Random.Bool());
+        .RuleFor(a => a.Street, f => f.Address.StreetName())
+        .RuleFor(a => a.City, f => f.Address.City())
+        .RuleFor(a => a.State, f => f.Address.State())
+        .RuleFor(a => a.ZipCode, f => f.Address.ZipCode())
+        .RuleFor(a => a.Country, f => f.Address.Country());
 
-    var users = userFaker.Generate(numberOfDocumentsPerBatch, null);
+    var orderStatuses = new[] { "New", "Processing", "Shipped", "Delivered", "Cancelled" };
+    var weights = new[] { .8f,  };
+    var orderFaker = new Faker<Order>()
+        .StrictMode(true)
+        .RuleFor(o => o.Id, f => Guid.NewGuid().ToString())
+        .RuleFor(o => o.CustomerId, f => Guid.NewGuid().ToString())
+        .RuleFor(o => o.TenantId, f => $"tenant-{f.Random.Int(1, 10)}")
+        .RuleFor(o => o.Products, f => productFaker.Generate(f.Random.Int(100, 100)))
+        .RuleFor(t => t.OrderDate, f => f.Date.Past(5).ToUniversalTime())
+        .RuleFor(o => o.OrderStatus, f => f.PickRandom(orderStatuses))
+        .RuleFor(o => o.TotalAmount, f => f.Finance.Amount())
+        .RuleFor(o => o.Payment, f => paymentInfoFaker.Generate())
+        .RuleFor(o => o.ShippingAddress, f => addressFaker.Generate());
 
-    return users;
+    var orders = orderFaker.Generate(numberOfDocumentsPerBatch, null);
+
+    return orders;
 }
